@@ -146,11 +146,12 @@ function _check_git_aliases() {
 
     if [[ "$typed" = "git "* ]]; then
         local found=false
-        git config --get-regexp "^alias\..+$" | awk '{split($0, a, " ", 2); print a[1], a[2]}' | while read key value; do
+        git config --get-regexp "^alias\..+$" | awk '{split($0, a, " "); print a[1], substr($0, length(a[1]) + 2)}' | while read key value; do
             key="${key#alias.}"
-            if [[ "$expanded" = "git $value" || "$expanded" = "git $value "* ]]; then
+            if [[ "git $value" == "$expanded" ]]; then
                 ysu_message "git alias" "$value" "git $key"
                 found=true
+                break
             fi
         done
 
