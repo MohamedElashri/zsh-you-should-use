@@ -18,7 +18,8 @@ else
 fi
 
 function check_alias_usage() {
-    local limit="${1:-9000000000000000}"
+    # Use an environment variable or a reasonable default if not defined
+    local limit="${YSU_HISTORY_LIMIT:-10000}"
     local key
 
     declare -A usage
@@ -28,28 +29,67 @@ function check_alias_usage() {
 
     local current=0
     local total=$(wc -l < "$HISTFILE")
-    if [[ $total -gt $limit ]]; then
-        total=$limit
-    fi
+    total=$(( total > limit ? limit : total ))
 
-    <"$HISTFILE" | tail "-$limit" | cut -d";" -f2 | while read line; do
+    # Process substitution to avoid pipeline scope issues
+    while read line; do
         local entry
         for entry in ${(@s/|/)line}; do
-            entry="$(echo "$entry" | sed -e 's/^ *//')"
+            # Trim leading whitespace using zsh parameter expansion
+            entry="${entry##*( )}"
             local word=${entry[(w)1]}
             if [[ -n ${usage[$word]} ]]; then
-                let "usage[$word] = usage[$word] + 1"
+                (( usage[$word]++ ))
             fi
         done
-        let "current = current + 1"
+        (( current++ ))
         printf "[$current/$total]\r"
-    done
+    done < <(tail -n $limit "$HISTFILE")
+
     printf "\r\033[K"
 
+    # Output sorted usage
     for key in ${(k)usage}; do
         echo "${usage[$key]}: $key='${aliases[$key]}'"
     done | sort -rn -k1
 }
+
+function _write_ysu_buffer() {
+    _YSU_BUFFER+="$@"
+    local position="${YSU_MESSAGE_POSITION:-before}"
+    if [[ "$position" = "before" ]]; then
+        _flush_ysu_buffer
+    elif [[ "$position" != "after" ]]; then
+        (>&2 printf "${RED}${BOLD}Unknown value for YSU_MESSAGE_POSITION '$position'. Expected value 'before' or 'after'${NONE}\n")
+        _flush_ysu_buffer
+    fi
+}
+
+function _flush_ysu_buffer() {
+    (>&2 printf "$_YSU_BUFFER")
+    _YSU_BUFFER=""
+}
+
+function ysu_message() {
+    local DEFAULT_MESSAGE_FORMAT="${BOLD}${YELLOW}\
+Found existing %alias_type for ${PURPLE}\"%command\"${YELLOW}. \
+You should use: ${PURPLE}\"%alias\"${NONE}"
+
+    local alias_type_arg="${1}"
+    local command_arg="${2}"
+    local alias_arg="${3}"
+
+    command_arg="${command_arg//\%/%%}"
+    command_arg="${command_arg//\\/\\\\}"
+
+    local MESSAGE="${YSU_MESSAGE_FORMAT:-"$DEFAULT_MESSAGE_FORMAT"}"
+    MESSAGE="${MESSAGE//\%alias_type/$alias_type_arg}"
+    MESSAGE="${MESSAGE//\%command/$command_arg}"
+    MESSAGE="${MESSAGE//\%alias/$alias_arg}"
+
+    _write_ysu_buffer "$MESSAGE\n"
+}
+
 
 function _write_ysu_buffer() {
     _YSU_BUFFER+="$@"
