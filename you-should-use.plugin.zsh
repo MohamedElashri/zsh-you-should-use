@@ -56,28 +56,19 @@ function check_alias_usage() {
 
 function _write_ysu_buffer() {
     _YSU_BUFFER+="$@"
-    # Automatically determine if the buffer should be flushed based on conditions or settings
-    if [[ "${YSU_MESSAGE_POSITION:-before}" = "before" ]]; then
+    local position="${YSU_MESSAGE_POSITION:-before}"
+    if [[ "$position" = "before" ]]; then
+        _flush_ysu_buffer
+    elif [[ "$position" != "after" ]]; then
+        (>&2 printf "${RED}${BOLD}Unknown value for YSU_MESSAGE_POSITION '$position'. Expected value 'before' or 'after'${NONE}\n")
         _flush_ysu_buffer
     fi
 }
 
 function _flush_ysu_buffer() {
-    if [[ -n "$_YSU_BUFFER" ]]; then
-        (>&2 printf "$_YSU_BUFFER")
-        _YSU_BUFFER=""
-    fi
-    # Additional mechanism to ensure buffer is cleared at command prompt
-    add-zsh-hook precmd _flush_ysu_buffer_if_needed
+    (>&2 printf "$_YSU_BUFFER")
+    _YSU_BUFFER=""
 }
-
-function _flush_ysu_buffer_if_needed() {
-    if [[ -n "$_YSU_BUFFER" ]]; then
-        (>&2 printf "$_YSU_BUFFER")
-        _YSU_BUFFER=""
-    fi
-}
-
 
 function ysu_message() {
     local DEFAULT_MESSAGE_FORMAT="${BOLD}${YELLOW}\
@@ -88,17 +79,19 @@ You should use: ${PURPLE}\"%alias\"${NONE}"
     local command_arg="${2}"
     local alias_arg="${3}"
 
-    command_arg="${command_arg//\%/%%}"
-    command_arg="${command_arg//\\/\\\\}"
+    # More robust escaping using zsh parameter expansion
+    local escaped_command_arg="${command_arg//\%/%%}"
+    escaped_command_arg="${escaped_command_arg//\\/\\\\}"
+    local escaped_alias_arg="${alias_arg//\%/%%}"
+    escaped_alias_arg="${escaped_alias_arg//\\/\\\\}"
 
     local MESSAGE="${YSU_MESSAGE_FORMAT:-"$DEFAULT_MESSAGE_FORMAT"}"
     MESSAGE="${MESSAGE//\%alias_type/$alias_type_arg}"
-    MESSAGE="${MESSAGE//\%command/$command_arg}"
-    MESSAGE="${MESSAGE//\%alias/$alias_arg}"
+    MESSAGE="${MESSAGE//\%command/$escaped_command_arg}"
+    MESSAGE="${MESSAGE//\%alias/$escaped_alias_arg}"
 
     _write_ysu_buffer "$MESSAGE\n"
 }
-
 
 function _write_ysu_buffer() {
     _YSU_BUFFER+="$@"
@@ -147,19 +140,14 @@ function _check_git_aliases() {
     local typed="$1"
     local expanded="$2"
 
-    if [[ "$typed" = "sudo "* ]]; then
+    if [[ "$YSU_IGNORE_SUDO" != "true" && "$typed" = "sudo "* ]]; then
         return
     fi
 
     if [[ "$typed" = "git "* ]]; then
         local found=false
-        git config --get-regexp "^alias\..+$" | sort | while read key value; do
+        git config --get-regexp "^alias\..+$" | awk '{split($0, a, " ", 2); print a[1], a[2]}' | while read key value; do
             key="${key#alias.}"
-            if [[ -z "$value" ]]; then
-                value="${key#* }"
-                key="${key%% *}"
-            fi
-
             if [[ "$expanded" = "git $value" || "$expanded" = "git $value "* ]]; then
                 ysu_message "git alias" "$value" "git $key"
                 found=true
@@ -172,15 +160,18 @@ function _check_git_aliases() {
     fi
 }
 
+
 function _check_global_aliases() {
     local typed="$1"
     local expanded="$2"
 
+    if [[ "$YSU_IGNORE_SUDO" != "true" && "$typed" = "sudo "* ]]; then
+        return
+    fi
+
     local found=false
-    alias -g | sort | while read entry; do
-        local tokens=("${(@s/=/)entry}")
-        local key="${tokens[1]}"
-        local value="${(Q)tokens[2]}"
+    alias -g | sort | awk -F'=' '{print $1, $2}' | while read key value; do
+        value="${(Q)value}"
         if [[ ${YSU_IGNORED_GLOBAL_ALIASES[(r)$key]} == "$key" ]]; then
             continue
         fi
@@ -252,7 +243,7 @@ function disable_you_should_use() {
     add-zsh-hook -D preexec _check_aliases
     add-zsh-hook -D preexec _check_global_aliases
     add-zsh-hook -D preexec _check_git_aliases
-    add-zsh-hook -D precmd _flush_ysu_bufferf
+    add-zsh-hook -D precmd _flush_ysu_buffer
 }
 
 function enable_you_should_use() {
