@@ -56,19 +56,28 @@ function check_alias_usage() {
 
 function _write_ysu_buffer() {
     _YSU_BUFFER+="$@"
-    local position="${YSU_MESSAGE_POSITION:-before}"
-    if [[ "$position" = "before" ]]; then
-        _flush_ysu_buffer
-    elif [[ "$position" != "after" ]]; then
-        (>&2 printf "${RED}${BOLD}Unknown value for YSU_MESSAGE_POSITION '$position'. Expected value 'before' or 'after'${NONE}\n")
+    # Automatically determine if the buffer should be flushed based on conditions or settings
+    if [[ "${YSU_MESSAGE_POSITION:-before}" = "before" ]]; then
         _flush_ysu_buffer
     fi
 }
 
 function _flush_ysu_buffer() {
-    (>&2 printf "$_YSU_BUFFER")
-    _YSU_BUFFER=""
+    if [[ -n "$_YSU_BUFFER" ]]; then
+        (>&2 printf "$_YSU_BUFFER")
+        _YSU_BUFFER=""
+    fi
+    # Additional mechanism to ensure buffer is cleared at command prompt
+    add-zsh-hook precmd _flush_ysu_buffer_if_needed
 }
+
+function _flush_ysu_buffer_if_needed() {
+    if [[ -n "$_YSU_BUFFER" ]]; then
+        (>&2 printf "$_YSU_BUFFER")
+        _YSU_BUFFER=""
+    fi
+}
+
 
 function ysu_message() {
     local DEFAULT_MESSAGE_FORMAT="${BOLD}${YELLOW}\
@@ -243,7 +252,7 @@ function disable_you_should_use() {
     add-zsh-hook -D preexec _check_aliases
     add-zsh-hook -D preexec _check_global_aliases
     add-zsh-hook -D preexec _check_git_aliases
-    add-zsh-hook -D precmd _flush_ysu_buffer
+    add-zsh-hook -D precmd _flush_ysu_bufferf
 }
 
 function enable_you_should_use() {
